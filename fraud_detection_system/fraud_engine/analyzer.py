@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from .hash_calculator import ImageHashes
 from .comparator import ImageComparator, ComparisonResult
+from .ai_analyzer import AIComparator
 from database.models import EventImage, ImageHash, FraudAnalysis
 from database.operations import FraudAnalysisOperations, ImageHashOperations
 
@@ -44,11 +45,13 @@ class FraudAnalyzer:
     
     def __init__(self):
         self.comparator = ImageComparator()
+        self.ai_engine = AIComparator()
     
     def analyze_image_fraud(self, new_image_hash: ImageHashes,
                            comparison_image_hash: ImageHashes,
                            metadata_flags: List[str] = None,
-                           filename_flags: List[str] = None) -> FraudAnalysisResult:
+                           filename_flags: List[str] = None,
+                           ai_score: float = 0.0) -> FraudAnalysisResult:
         """
         Perform complete fraud analysis between two images.
         Based on the scoring logic from existing fraud_detection.py.
@@ -64,7 +67,7 @@ class FraudAnalyzer:
         
         # Calculate fraud score
         fraud_score, auto_triggers = self._calculate_fraud_score(
-            comparison, metadata_flags, filename_flags
+            comparison, metadata_flags, filename_flags, ai_score=ai_score
         )
         
         # Determine verdict
@@ -90,7 +93,7 @@ class FraudAnalyzer:
     
     def _calculate_fraud_score(self, comparison: ComparisonResult,
                              metadata_flags: List[str],
-                             filename_flags: List[str]) -> Tuple[int, List[str]]:
+                             filename_flags: List[str], ai_score: float = 0.0) -> Tuple[int, List[str]]:
         """
         Calculate fraud score based on existing algorithm from fraud_detection.py.
         Returns: (fraud_score, auto_triggers)
@@ -159,6 +162,15 @@ class FraudAnalyzer:
                 trigger_desc, trigger_score_val = trigger_score
                 fraud_score = max(fraud_score, trigger_score_val)
         
+        # --- TAMBAHAN 3: AI MENGAMBIL ALIH KEPUTUSAN HASH ---
+        if ai_score > 85:
+            fraud_score = max(fraud_score, 85) # Maksa skor jadi merah
+            auto_triggers.append(("AI CLIP: Identik (Beda Sudut)", 85))
+        elif ai_score > 70:
+            fraud_score = max(fraud_score, 75) # Maksa skor jadi kuning
+            auto_triggers.append(("AI CLIP: Sangat Mirip Visualnya", 75))
+        # ----------------------------------------------------
+
         return min(fraud_score, 100), [t[0] if isinstance(t, tuple) else t for t in auto_triggers]
     
     def _check_auto_triggers(self, visual_similarity: float, crop_similarity: float,
@@ -310,7 +322,10 @@ class FraudAnalyzer:
             # Get hash for new image
             new_hash_record = ImageHashOperations.get_hash_by_image_id(db_session, new_image.id)
             if not new_hash_record:
-                continue  # Skip if no hash available
+                continue
+            
+            # --- TAMBAHAN 4A: AI Baca Foto Baru ---
+            vektor_baru = self.ai_engine.hitung_vektor(new_image.file_path)
             
             new_hash = ImageHashes(
                 phash=new_hash_record.phash,
@@ -327,6 +342,10 @@ class FraudAnalyzer:
                 if not historical_hash_record:
                     continue
                 
+                # --- TAMBAHAN 4B: AI Baca Foto Lama & Bandingkan ---
+                vektor_lama = self.ai_engine.hitung_vektor(historical_image.file_path)
+                ai_score_final = self.ai_engine.bandingkan_vektor(vektor_baru, vektor_lama)
+                
                 historical_hash = ImageHashes(
                     phash=historical_hash_record.phash,
                     ahash=historical_hash_record.ahash,
@@ -336,8 +355,9 @@ class FraudAnalyzer:
                     file_hash=historical_hash_record.file_hash
                 )
                 
-                # Perform analysis
-                analysis_result = self.analyze_image_fraud(new_hash, historical_hash)
+                # Perform analysis (Jangan lupa lempar ai_score_final ke dalam sini)
+                # Oiya, kita harus update juga di baris 46 biar analyze_image_fraud nerima ai_score
+                analysis_result = self.analyze_image_fraud(new_hash, historical_hash, ai_score=ai_score_final)
                 
                 # Only store significant results
                 if analysis_result.fraud_score >= 40 or analysis_result.comparison_result.combined_similarity > 50:

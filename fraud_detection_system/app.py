@@ -114,6 +114,7 @@ def vendor_management_page():
                                 with col1:
                                     st.write(f"**Status:** {event.status}")
                                     st.write(f"**Submitted:** {event.submission_date.strftime('%Y-%m-%d %H:%M')}")
+                                    
                                     if event.notes:
                                         st.write(f"**Notes:** {event.notes}")
                                 
@@ -457,11 +458,40 @@ def analysis_results_page():
                         
                         col1, col2, col3 = st.columns([2, 2, 1])
                         
+                        # --- MULAI TAMBAHAN AI CLIP ---
+                        from fraud_engine.ai_analyzer import AIComparator
+                        
+                        # Biar AI tidak loading berulang kali, kita simpan di session
+                        if 'ai_engine' not in st.session_state:
+                            with st.spinner("Mesin AI sedang dipanaskan..."):
+                                st.session_state.ai_engine = AIComparator()
+                        
+                        # Ambil jalur file foto dari database
+                        path_baru = analysis.new_image.file_path
+                        path_lama = analysis.comparison_image.file_path
+                        
+                        # AI bekerja menghitung angle/sudut
+                        vektor_baru = st.session_state.ai_engine.hitung_vektor(path_baru)
+                        vektor_lama = st.session_state.ai_engine.hitung_vektor(path_lama)
+                        ai_score = st.session_state.ai_engine.bandingkan_vektor(vektor_baru, vektor_lama)
+                        # --- SELESAI TAMBAHAN AI CLIP ---
+                        
                         with col1:
                             st.write(f"**{severity_color} {severity_text}**")
-                            st.write(f"**Score:** {analysis.fraud_score}/100")
-                            st.write(f"**Similarity:** {analysis.similarity_score:.1f}%")
-                            st.write(f"**Verdict:** {analysis.verdict}")
+                            st.write(f"**Skor Sistem Lama:** {analysis.fraud_score}/100")
+                            st.write(f"**Kemiripan Hash:** {analysis.similarity_score:.1f}%")
+                            
+                            # Menampilkan Hasil Trawangan AI ke Layar
+                            st.markdown("---") # Garis pembatas biar rapi
+                            if ai_score > 85:
+                                st.error(f"🧠 **Skor AI (Angle): {ai_score:.1f}%** \n(Identik! Ini acara yang sama)")
+                            elif ai_score > 70:
+                                st.warning(f"🧠 **Skor AI (Angle): {ai_score:.1f}%** \n(Sangat Mirip)")
+                            else:
+                                st.success(f"🧠 **Skor AI (Angle): {ai_score:.1f}%** \n(Aman, beda kegiatan)")
+                                
+                            st.markdown("---")
+                            st.write(f"**Verdict Akhir:** {analysis.verdict}")
                         
                         with col2:
                             st.write("**Image Comparison:**")
